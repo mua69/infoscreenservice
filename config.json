@@ -1,0 +1,12 @@
+{
+  "BindPort" :4201,
+  "BindAdr" : "0.0.0.0",
+  "AppRoot" : "/home/mueller/infoscreen/infoscreen/dist/infoscreen",
+  "ContentSourceDir": "src",
+  "ImageSourceDir": "img",
+  "TickerSourceDir": "ticker",
+  "ContentImageDisplayDuration": 5,
+  "TickerDisplayDuration": 2,
+  "MixinImageRate": 2,
+  "MixinImageDisplayDuration": 2
+}
