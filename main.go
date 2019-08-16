@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/nfnt/resize"
@@ -11,6 +12,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,6 +21,7 @@ import (
 )
 
 type Config struct {
+	LogFile string
 	BindPort int
 	BindAdr string
 	AppRoot string
@@ -27,6 +30,9 @@ type Config struct {
 	ImageSourceDir string
 	TickerSourceDir string
 	ContentSyncInterval int
+	BrowserPath string
+	TerminateHour int
+	TerminateMinute int
 	ContentImageDisplayDuration int
 	MixinImageDisplayDuration int
 	MixinImageRate int
@@ -64,10 +70,14 @@ var TickerTimeStamp time.Time
 
 var ContentMutex sync.Mutex
 
+var Terminate = false
+
+var HttpServer *http.Server
+var BrowserCmd *exec.Cmd
 
 
 
-var g_config = Config{AppRoot:"app", RepoRoot:"rep", BindPort:5000, BindAdr:"localhost",
+var g_config = Config{LogFile:"infoscreen.log", AppRoot:"app", RepoRoot:"rep", BindPort:5000, BindAdr:"localhost",
 	ImageSourceDir:"imageSourceDirNotSet", ContentSourceDir:"contentSourceDirNotSet",
 	TickerSourceDir:"tickerSourceDirNotSet",
 	ContentImageDisplayDuration:5, TickerDisplayDuration:5,
@@ -78,13 +88,13 @@ func readConfig(filename string) bool {
 	data, err := ioutil.ReadFile(filename)
 
 	if err != nil {
-		fmt.Printf("Failed to open config file \"%s\": %s\n", filename, err.Error())
+		Error("Failed to open config file \"%s\": %s\n", filename, err.Error())
 		return false
 	}
 
 	err = json.Unmarshal(data, &g_config)
 	if err != nil {
-		fmt.Printf("Syntax error in config file %s: %v\n", filename, err)
+		Error("Syntax error in config file %s: %v\n", filename, err)
 		return false
 	}
 
@@ -175,7 +185,7 @@ func isImageFile(filename string) bool {
 }
 
 func sendSizedImage(fp *os.File, width, height uint, resp http.ResponseWriter, req *http.Request) {
-	Info(0, "Sizing Image: %s...", fp.Name())
+	Info(1, "Sizing Image: %s...", fp.Name())
 
 	img, imageType, err := image.Decode(fp)
 
@@ -185,12 +195,12 @@ func sendSizedImage(fp *os.File, width, height uint, resp http.ResponseWriter, r
 		return
 	}
 
-	Info(0, "image type: %s", imageType)
+	Info(1, "image type: %s", imageType)
 
 	w := img.Bounds().Dx()
 	h := img.Bounds().Dy()
 
-	Info(0, "Imagesize: %dx%d", w, h)
+	Info(1, "Imagesize: %dx%d", w, h)
 
 	size := float32(width)/float32(w)
 	h1 := float32(h)*size
@@ -220,9 +230,7 @@ func serveFile(urlRoot, basePath string, resp http.ResponseWriter, req *http.Req
 
 	path = filepath.Join(basePath, path)
 
-	fmt.Println(path)
-
-	fmt.Println(hashFile(path))
+	Info(0, "Request: %s", req.URL.Path)
 
 	fp, err := os.Open(path)
 
@@ -247,7 +255,7 @@ func serveFile(urlRoot, basePath string, resp http.ResponseWriter, req *http.Req
 		imgHeight, _ = strconv.Atoi(v[0])
 	}
 
-	Info(0, "Found w, h: %d %d", imgWidth, imgHeight)
+	Info(1, "Found w, h: %d %d", imgWidth, imgHeight)
 
 	if isImageFile(path) && imgWidth > 0 && imgHeight > 0 {
 		sendSizedImage(fp, uint(imgWidth), uint(imgHeight), resp, req)
@@ -266,7 +274,6 @@ func handleAppRequest(resp http.ResponseWriter, req *http.Request) {
 	//resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 	//resp.Header().Set("Access-Control-Allow-Origin", "*")
 
-	fmt.Println(req.URL.Path)
 	serveFile("/app/", g_config.AppRoot, resp, req)
 }
 
@@ -274,7 +281,6 @@ func handleRepRequest(resp http.ResponseWriter, req *http.Request) {
 	//resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 	//resp.Header().Set("Access-Control-Allow-Origin", "*")
 
-	fmt.Println(req.URL.Path)
 	serveFile("/app/api/rep/", g_config.RepoRoot, resp, req)
 }
 
@@ -314,8 +320,8 @@ func handleGetConfigRequest(resp http.ResponseWriter, req *http.Request) {
 }
 
 func syncContent() {
-	for {
-		Info(0, "Syncing content...")
+	for !Terminate {
+		Info(1, "Syncing content...")
 
 		refCnt := len(ContentList)
 
@@ -378,28 +384,85 @@ func syncContent() {
 	}
 }
 
-func main() {
-	if !readConfig("config.json") {
-		os.Exit(1)
-	}
+func terminate() {
+	for {
+		now := time.Now()
 
-	setupFileExtensions()
-
-	go syncContent()
-
-	httpServer := &http.Server{
-			Addr:           fmt.Sprintf("%s:%d", g_config.BindAdr, g_config.BindPort),
-			Handler:        nil,
-			ReadTimeout:    10 * time.Second,
-			WriteTimeout:   10 * time.Second,
-			MaxHeaderBytes: 1 << 20,
+		if now.Hour() == g_config.TerminateHour && now.Minute() == g_config.TerminateMinute {
+			err := HttpServer.Shutdown(context.Background())
+			if err != nil {
+				Error("Error will stopping http server: %s", err.Error())
+			}
+			stopBrowser()
+			Terminate = true
+			return
 		}
+
+		time.Sleep(10*time.Second)
+	}
+}
+
+func startBrowser() {
+	if g_config.BrowserPath != "" {
+		url := fmt.Sprintf("http://%s:%d/app", "localhost", g_config.BindPort)
+		BrowserCmd = exec.Command(g_config.BrowserPath, url)
+
+		if err := BrowserCmd.Start(); err != nil {
+			Error("Failed to start browser: %s", err.Error())
+			BrowserCmd = nil
+		}
+	}
+}
+
+func stopBrowser() {
+	if BrowserCmd != nil {
+		if err := BrowserCmd.Process.Kill(); err != nil {
+			Error("Failed to kill browser: %s", err.Error())
+		}
+
+		BrowserCmd.Wait()
+	}
+}
+
+
+func startHttpServer() {
+	HttpServer = &http.Server{
+		Addr:           fmt.Sprintf("%s:%d", g_config.BindAdr, g_config.BindPort),
+		Handler:        nil,
+		ReadTimeout:    20 * time.Second,
+		WriteTimeout:   20 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+	}
 
 	http.HandleFunc("/app/", handleAppRequest)
 	http.HandleFunc("/app/api/rep/", handleRepRequest)
 	http.HandleFunc("/app/api/content", handleGetContentRequest)
 	http.HandleFunc("/app/api/config", handleGetConfigRequest)
 
-	fmt.Println(httpServer.ListenAndServe())
+	Info(0,"http server exited: %s", HttpServer.ListenAndServe())
+}
+
+func main() {
+	if !readConfig("config.json") {
+		os.Exit(1)
+	}
+
+	if g_config.LogFile != "" {
+		if !OpenLogFile(g_config.LogFile) {
+			os.Exit(1)
+		}
+	}
+
+
+	setupFileExtensions()
+
+	go syncContent()
+	go terminate()
+	go startHttpServer()
+	go startBrowser()
+
+	for !Terminate {
+		time.Sleep(time.Second)
+	}
 
 }

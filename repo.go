@@ -38,7 +38,8 @@ func hashFile(path string) string {
 	_, err = io.Copy(mac, fp)
 
     if err != nil {
-               Error("hashFile: hashing failed: %s", err.Error())
+    	Error("hashFile: hashing failed: %s", err.Error())
+    	return ""
 	}
 
 	sum := mac.Sum(nil)
@@ -124,7 +125,7 @@ func collectFilesFromDirectory(path string, ext FileExtMap) ([]string, time.Time
 	}
 
 	for _, file := range files {
-		Info(0, "Checking file: %s", file.Name())
+		Info(1, "Checking file: %s", file.Name())
 		if file.IsDir() && file.Name() != "." && file.Name() != ".." {
 			r, t := collectFilesFromDirectory(filepath.Join(path, file.Name()), ext)
 			res = append(res, r...)
