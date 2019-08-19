@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -37,6 +38,10 @@ type Config struct {
 	MixinImageDisplayDuration int
 	MixinImageRate int
 	TickerDisplayDuration int
+
+	OpenWeatherMapUrl string
+	OpenWeatherMapApiKey string
+	OpenWeatherMapCityId string
 }
 
 type ImagesResponse struct {
@@ -46,6 +51,10 @@ type ImagesResponse struct {
 }
 
 type ConfigResponse struct {
+	OpenWeatherMapUrl string `json:"open_weather_map_url"`
+	OpenWeatherMapApiKey string `json:"open_weather_map_api_key"`
+	OpenWeatherMapCityId string `json:"open_weather_map_city_id"`
+
 	ContentImageDisplayDuration int `json:"content_image_display_duration"`
 	TickerDisplayDuration int `json:"ticker_display_duration"`
 	MixinImageDisplayDuration int `json:"mixin_image_display_duration"`
@@ -81,7 +90,8 @@ var g_config = Config{LogFile:"infoscreen.log", AppRoot:"app", RepoRoot:"rep", B
 	ImageSourceDir:"imageSourceDirNotSet", ContentSourceDir:"contentSourceDirNotSet",
 	TickerSourceDir:"tickerSourceDirNotSet",
 	ContentImageDisplayDuration:5, TickerDisplayDuration:5,
-	ContentSyncInterval:60, MixinImageDisplayDuration:5, MixinImageRate:2 }
+	ContentSyncInterval:60, MixinImageDisplayDuration:5, MixinImageRate:2,
+	OpenWeatherMapUrl:"http://api.openweathermap.org/data/2.5"}
 
 
 func readConfig(filename string) bool {
@@ -274,14 +284,14 @@ func handleAppRequest(resp http.ResponseWriter, req *http.Request) {
 	//resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 	//resp.Header().Set("Access-Control-Allow-Origin", "*")
 
-	serveFile("/app/", g_config.AppRoot, resp, req)
+	serveFile("/", g_config.AppRoot, resp, req)
 }
 
 func handleRepRequest(resp http.ResponseWriter, req *http.Request) {
 	//resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 	//resp.Header().Set("Access-Control-Allow-Origin", "*")
 
-	serveFile("/app/api/rep/", g_config.RepoRoot, resp, req)
+	serveFile("/api/rep/", g_config.RepoRoot, resp, req)
 }
 
 func handleGetContentRequest(resp http.ResponseWriter, req *http.Request) {
@@ -310,7 +320,10 @@ func handleGetConfigRequest(resp http.ResponseWriter, req *http.Request) {
 	res := ConfigResponse{ContentImageDisplayDuration:g_config.ContentImageDisplayDuration,
 		TickerDisplayDuration:g_config.TickerDisplayDuration,
 		MixinImageRate:g_config.MixinImageRate,
-		MixinImageDisplayDuration:g_config.MixinImageDisplayDuration}
+		MixinImageDisplayDuration:g_config.MixinImageDisplayDuration,
+		OpenWeatherMapUrl:g_config.OpenWeatherMapUrl,
+		OpenWeatherMapApiKey:g_config.OpenWeatherMapApiKey,
+		OpenWeatherMapCityId:g_config.OpenWeatherMapCityId}
 
 	d, err := json.Marshal(res)
 	if err != nil {
@@ -385,6 +398,8 @@ func syncContent() {
 }
 
 func terminate() {
+	time.Sleep(70*time.Second) // avoid direct terminating after re-start
+
 	for {
 		now := time.Now()
 
@@ -404,7 +419,7 @@ func terminate() {
 
 func startBrowser() {
 	if g_config.BrowserPath != "" {
-		url := fmt.Sprintf("http://%s:%d/app", "localhost", g_config.BindPort)
+		url := fmt.Sprintf("http://%s:%d/", "localhost", g_config.BindPort)
 		BrowserCmd = exec.Command(g_config.BrowserPath, url)
 
 		if err := BrowserCmd.Start(); err != nil {
@@ -416,7 +431,7 @@ func startBrowser() {
 
 func stopBrowser() {
 	if BrowserCmd != nil {
-		if err := BrowserCmd.Process.Kill(); err != nil {
+		if err := BrowserCmd.Process.Signal(syscall.SIGKILL); err != nil {
 			Error("Failed to kill browser: %s", err.Error())
 		}
 
@@ -434,10 +449,10 @@ func startHttpServer() {
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	http.HandleFunc("/app/", handleAppRequest)
-	http.HandleFunc("/app/api/rep/", handleRepRequest)
-	http.HandleFunc("/app/api/content", handleGetContentRequest)
-	http.HandleFunc("/app/api/config", handleGetConfigRequest)
+	http.HandleFunc("/", handleAppRequest)
+	http.HandleFunc("/api/rep/", handleRepRequest)
+	http.HandleFunc("/api/content", handleGetContentRequest)
+	http.HandleFunc("/api/config", handleGetConfigRequest)
 
 	Info(0,"http server exited: %s", HttpServer.ListenAndServe())
 }
