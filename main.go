@@ -191,7 +191,11 @@ func determineContentType(path string) string {
 }
 
 func isImageFile(filename string) bool {
-	return ImageExtensions[filepath.Ext(filename)]
+	return ImageExtensions[strings.ToLower(filepath.Ext(filename))]
+}
+
+func isTextFile(filename string) bool {
+	return TextExtensions[strings.ToLower(filepath.Ext(filename))]
 }
 
 func sendSizedImage(fp *os.File, width, height uint, resp http.ResponseWriter, req *http.Request) {
@@ -338,7 +342,7 @@ func syncContent() {
 
 		refCnt := len(ContentList)
 
-		nl, ts := checkAndImport(g_config.ContentSourceDir, ContentTimeStamp, refCnt, ImageExtensions)
+		nl, ts := checkAndImport(g_config.ContentSourceDir, ContentTimeStamp, refCnt, isImageFile)
 
 		if nl != nil {
 			ContentMutex.Lock()
@@ -355,7 +359,7 @@ func syncContent() {
 		}
 
 		refCnt = len(DiaShowList)
-		nl, ts = checkAndImport(g_config.ImageSourceDir, DiaShowTimeStamp, refCnt, ImageExtensions)
+		nl, ts = checkAndImport(g_config.ImageSourceDir, DiaShowTimeStamp, refCnt, isImageFile)
 		if nl != nil {
 			ContentMutex.Lock()
 
@@ -371,7 +375,7 @@ func syncContent() {
 		}
 
 		refCnt = len(TickerList)
-		nl, ts = checkAndImport(g_config.TickerSourceDir, TickerTimeStamp, refCnt, TextExtensions)
+		nl, ts = checkAndImport(g_config.TickerSourceDir, TickerTimeStamp, refCnt, isTextFile)
 		if nl != nil {
 			ContentMutex.Lock()
 

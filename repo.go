@@ -113,7 +113,7 @@ func copyToRepo(path string) string {
 	return repoFile
 }
 
-func collectFilesFromDirectory(path string, ext FileExtMap) ([]string, time.Time) {
+func collectFilesFromDirectory(path string, filecheck func(string) bool) ([]string, time.Time) {
 	var res []string
 	var ts time.Time
 
@@ -127,13 +127,13 @@ func collectFilesFromDirectory(path string, ext FileExtMap) ([]string, time.Time
 	for _, file := range files {
 		Info(1, "Checking file: %s", file.Name())
 		if file.IsDir() && file.Name() != "." && file.Name() != ".." {
-			r, t := collectFilesFromDirectory(filepath.Join(path, file.Name()), ext)
+			r, t := collectFilesFromDirectory(filepath.Join(path, file.Name()), filecheck)
 			res = append(res, r...)
 			if t.After(ts) {
 				ts = t
 			}
 		} else {
-			if ext[filepath.Ext(file.Name())] {
+			if filecheck(file.Name()) {
 				res = append(res, filepath.Join(path, file.Name()))
 				if file.ModTime().After(ts) {
 					ts = file.ModTime()
@@ -145,8 +145,8 @@ func collectFilesFromDirectory(path string, ext FileExtMap) ([]string, time.Time
 	return res, ts
 }
 
-func checkAndImport(sourceDir string, refTimeStamp time.Time, refCount int, ext FileExtMap) ([]string, time.Time) {
-	files, ts := collectFilesFromDirectory(sourceDir, ext)
+func checkAndImport(sourceDir string, refTimeStamp time.Time, refCount int, filecheck func(string) bool) ([]string, time.Time) {
+	files, ts := collectFilesFromDirectory(sourceDir, filecheck)
 
 	var res []string
 
