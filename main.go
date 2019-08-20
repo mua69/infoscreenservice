@@ -418,6 +418,8 @@ func terminate() {
 }
 
 func startBrowser() {
+	time.Sleep(5*time.Second)
+
 	if g_config.BrowserPath != "" {
 		url := fmt.Sprintf("http://%s:%d/", "localhost", g_config.BindPort)
 		BrowserCmd = exec.Command(g_config.BrowserPath, url)
@@ -470,6 +472,10 @@ func main() {
 
 
 	setupFileExtensions()
+
+	Ticker = make([]string, 0, 10)
+	ContentList = make([]string, 0, 10)
+	DiaShowList = make([]string, 0, 10)
 
 	go syncContent()
 	go terminate()
