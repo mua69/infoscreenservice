@@ -226,7 +226,9 @@ func sendSizedImage(fp *os.File, width, height uint, resp http.ResponseWriter, r
 		simg = resize.Resize(0, height, img, resize.Bicubic)
 	}
 
-	err = png.Encode(resp, simg)
+	encoder := png.Encoder{CompressionLevel:png.BestSpeed}
+
+	err = encoder.Encode(resp, simg)
 
 	if err != nil {
 		Error("sendSizedImage: failed to encode image: %s", err.Error())
