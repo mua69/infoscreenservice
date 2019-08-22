@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/nfnt/resize"
+	"golang.org/x/text/encoding/charmap"
 	"image"
 	_ "image/jpeg"
 	"image/png"
@@ -19,6 +20,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 )
 
 type Config struct {
@@ -134,7 +136,19 @@ func parserTickerFile(path string) []string {
 		return nil
 	}
 
-	tickerData := strings.Split(string(buf), "\n")
+	sbuf := string(buf)
+
+	if !utf8.Valid(buf) {
+		Info(1, "Converting to UTF8")
+		s, err := charmap.Windows1252.NewDecoder().String(string(buf))
+		if err == nil {
+			sbuf = s
+		} else {
+			Error("Decoding windows-1252 to UTF8 failed: %s", err.Error())
+		}
+	}
+
+	tickerData := strings.Split(sbuf, "\n")
 
 	state := 0 // states: 0: remove empty lines, 1: collect ticker data
 	tickerEnt := ""
@@ -204,7 +218,7 @@ func sendSizedImage(fp *os.File, width, height uint, resp http.ResponseWriter, r
 	img, imageType, err := image.Decode(fp)
 
 	if err != nil {
-		Error("sendSizedImage: failed to decode image: %s: s", fp.Name(), err.Error)
+		Error("sendSizedImage: failed to decode image: %s: %s", fp.Name(), err.Error())
 		http.NotFound(resp, req)
 		return
 	}

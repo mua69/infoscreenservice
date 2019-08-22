@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"fmt"
+	"time"
 )
 
 var gVerbosity = 0
@@ -39,6 +40,7 @@ func logMsg(f string, args ... interface{}) {
 	fmt.Printf(f, args...)
 
 	if gLogFp != nil {
+		fmt.Fprintf(gLogFp, "%s: ", time.Now().Format(time.RFC3339))
 		fmt.Fprintf(gLogFp, f, args...)
 	}
 }
