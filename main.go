@@ -30,12 +30,16 @@ type Config struct {
 	AppRoot string
 	RepoRoot string
 	ContentSourceDir string
+	Content2SourceDir string
 	ImageSourceDir string
 	TickerSourceDir string
 	ContentSyncInterval int
 	BrowserPath string
 	TerminateHour int
 	TerminateMinute int
+
+	ScreenConfig int
+
 	ContentImageDisplayDuration int
 	MixinImageDisplayDuration int
 	MixinImageRate int
@@ -48,11 +52,13 @@ type Config struct {
 
 type ImagesResponse struct {
 	ContentImages []string `json:"content_images"`
+	Content2Images []string `json:"content2_images"`
 	MixinImages []string `json:"mixin_images"`
 	Ticker []string `json:"ticker"`
 }
 
 type ConfigResponse struct {
+	ScreenConfig int `json:"screen_config"`
 	OpenWeatherMapUrl string `json:"open_weather_map_url"`
 	OpenWeatherMapApiKey string `json:"open_weather_map_api_key"`
 	OpenWeatherMapCityId string `json:"open_weather_map_city_id"`
@@ -72,6 +78,9 @@ var TextExtensions FileExtMap
 var ContentList []string
 var ContentTimeStamp time.Time
 
+var Content2List []string
+var Content2TimeStamp time.Time
+
 var DiaShowList []string
 var DiaShowTimeStamp time.Time
 
@@ -90,10 +99,12 @@ var BrowserCmd *exec.Cmd
 
 var g_config = Config{LogFile:"infoscreen.log", AppRoot:"app", RepoRoot:"rep", BindPort:5000, BindAdr:"localhost",
 	ImageSourceDir:"imageSourceDirNotSet", ContentSourceDir:"contentSourceDirNotSet",
+	Content2SourceDir:"content2SourceDirNotSet",
 	TickerSourceDir:"tickerSourceDirNotSet",
 	ContentImageDisplayDuration:5, TickerDisplayDuration:5,
 	ContentSyncInterval:60, MixinImageDisplayDuration:5, MixinImageRate:2,
-	OpenWeatherMapUrl:"http://api.openweathermap.org/data/2.5"}
+	OpenWeatherMapUrl:"http://api.openweathermap.org/data/2.5",
+	ScreenConfig:1 }
 
 
 func readConfig(filename string) bool {
@@ -320,8 +331,8 @@ func handleGetContentRequest(resp http.ResponseWriter, req *http.Request) {
 
 	ContentMutex.Lock()
 
-	res := ImagesResponse{ContentImages:ContentList, MixinImages:DiaShowList,
-		Ticker:Ticker}
+	res := ImagesResponse{ContentImages:ContentList, Content2Images:Content2List,
+		MixinImages:DiaShowList, Ticker:Ticker}
 
 	d, err := json.Marshal(res)
 	if err != nil {
@@ -337,7 +348,8 @@ func handleGetConfigRequest(resp http.ResponseWriter, req *http.Request) {
 	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 	resp.Header().Set("Access-Control-Allow-Origin", "*")
 
-	res := ConfigResponse{ContentImageDisplayDuration:g_config.ContentImageDisplayDuration,
+	res := ConfigResponse{ScreenConfig:g_config.ScreenConfig,
+		ContentImageDisplayDuration:g_config.ContentImageDisplayDuration,
 		TickerDisplayDuration:g_config.TickerDisplayDuration,
 		MixinImageRate:g_config.MixinImageRate,
 		MixinImageDisplayDuration:g_config.MixinImageDisplayDuration,
@@ -370,6 +382,23 @@ func syncContent() {
 
 			Info(0, "New Content List")
 			for _, i := range ContentList {
+				Info(0, "  %s", i)
+			}
+		}
+
+		refCnt = len(Content2List)
+		nl, ts = checkAndImport(g_config.Content2SourceDir, Content2TimeStamp, refCnt, isImageFile)
+
+		if nl != nil {
+			ContentMutex.Lock()
+
+			Content2List = nl
+			Content2TimeStamp = ts
+
+			ContentMutex.Unlock()
+
+			Info(0, "New Content2 List")
+			for _, i := range Content2List {
 				Info(0, "  %s", i)
 			}
 		}
@@ -495,6 +524,7 @@ func main() {
 
 	Ticker = make([]string, 0, 10)
 	ContentList = make([]string, 0, 10)
+	Content2List = make([]string, 0, 10)
 	DiaShowList = make([]string, 0, 10)
 
 	go syncContent()
