@@ -16,7 +16,7 @@ type ImageCache struct {
 	Cache map[string]*ImageCacheEntry
 	CacheSize int64
 	CacheSizeLimit int64
-	Mutex sync.RWMutex
+	Mutex sync.Mutex
 }
 
 const MB = 1024*1024
@@ -36,12 +36,13 @@ func BuildCacheKey(name string, width, height uint) string {
 }
 
 func GetImageFromCache(name string, width, height uint) []byte {
-	Cache.Mutex.RLock()
+	Cache.Mutex.Lock()
 	ent := Cache.Cache[BuildCacheKey(name, width, height)]
-	Cache.Mutex.RUnlock()
+	defer Cache.Mutex.Unlock()
 
 	if ent != nil {
 		Info(0, "Cache hit for: %s %d %d", name, width,height)
+		ent.timestamp = time.Now()
 		return ent.image
 	}
 
