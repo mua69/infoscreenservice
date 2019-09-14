@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -27,6 +28,8 @@ type Config struct {
 	LogFile string
 	BindPort int
 	BindAdr string
+	CacheSize uint
+
 	AppRoot string
 	RepoRoot string
 	ContentSourceDir string
@@ -104,7 +107,7 @@ var g_config = Config{LogFile:"infoscreen.log", AppRoot:"app", RepoRoot:"rep", B
 	ContentImageDisplayDuration:5, TickerDisplayDuration:5,
 	ContentSyncInterval:60, MixinImageDisplayDuration:5, MixinImageRate:2,
 	OpenWeatherMapUrl:"http://api.openweathermap.org/data/2.5",
-	ScreenConfig:1 }
+	ScreenConfig:1, CacheSize:100 }
 
 
 func readConfig(filename string) bool {
@@ -223,7 +226,18 @@ func isTextFile(filename string) bool {
 	return TextExtensions[strings.ToLower(filepath.Ext(filename))]
 }
 
-func sendSizedImage(fp *os.File, width, height uint, resp http.ResponseWriter, req *http.Request) {
+func sendSizedImage(name string, fp *os.File, width, height uint, resp http.ResponseWriter, req *http.Request) {
+	cacheImage := GetImageFromCache(name, width, height)
+
+	if cacheImage != nil {
+		_, err := io.Copy(resp, bytes.NewReader(cacheImage))
+		if err != nil {
+			Error("sendSizedImage: failed send cached image: %s", err.Error())
+			http.NotFound(resp, req)
+		}
+		return
+	}
+
 	Info(1, "Sizing Image: %s...", fp.Name())
 
 	img, imageType, err := image.Decode(fp)
@@ -253,12 +267,22 @@ func sendSizedImage(fp *os.File, width, height uint, resp http.ResponseWriter, r
 
 	encoder := png.Encoder{CompressionLevel:png.BestSpeed}
 
-	err = encoder.Encode(resp, simg)
+	imageBuffer := new(bytes.Buffer)
+
+	err = encoder.Encode(imageBuffer, simg)
 
 	if err != nil {
 		Error("sendSizedImage: failed to encode image: %s", err.Error())
 		http.NotFound(resp, req)
 		return
+	}
+
+	addImageToCache(name, width, height, imageBuffer.Bytes())
+
+	_, err = io.Copy(resp, imageBuffer)
+
+	if err != nil {
+		Error("sendSizedImage: failed send image: %s", err.Error())
 	}
 }
 
@@ -299,7 +323,7 @@ func serveFile(urlRoot, basePath string, resp http.ResponseWriter, req *http.Req
 	Info(1, "Found w, h: %d %d", imgWidth, imgHeight)
 
 	if isImageFile(path) && imgWidth > 0 && imgHeight > 0 {
-		sendSizedImage(fp, uint(imgWidth), uint(imgHeight), resp, req)
+		sendSizedImage(filepath.Base(path), fp, uint(imgWidth), uint(imgHeight), resp, req)
 	} else {
 		_, err = io.Copy(resp, fp)
 
@@ -519,6 +543,7 @@ func main() {
 		}
 	}
 
+	InitImageCache()
 
 	setupFileExtensions()
 
