@@ -56,6 +56,11 @@ func addImageToCache(name string, width, height uint, image []byte) {
 
 	ent := Cache.Cache[key]
 
+	n:= len(image)
+	imgCopy := make([]byte, n)
+
+	copy(imgCopy, image)
+
 	if ent != nil {
 		Cache.CacheSize -= int64(len(ent.image))
 	} else {
@@ -64,9 +69,9 @@ func addImageToCache(name string, width, height uint, image []byte) {
 	}
 
 	ent.timestamp = time.Now()
-	ent.image = image
+	ent.image = imgCopy
 
-	Cache.CacheSize += int64(len(image))
+	Cache.CacheSize += int64(n)
 
 	Info(0, "added image '%s' %d %d to cache, cache size %.3f MB", name, width, height, float32(Cache.CacheSize)/MB)
 
