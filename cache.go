@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -15,6 +16,7 @@ type ImageCache struct {
 	Cache map[string]*ImageCacheEntry
 	CacheSize int64
 	CacheSizeLimit int64
+	Mutex sync.RWMutex
 }
 
 const MB = 1024*1024
@@ -25,13 +27,18 @@ func InitImageCache() {
 	Cache.Cache = make(map[string]*ImageCacheEntry)
 	Cache.CacheSize = 0
 	Cache.CacheSizeLimit = int64(g_config.CacheSize*MB)
+
+	Info(0, "Cache size: %d MB", g_config.CacheSize)
 }
 
 func BuildCacheKey(name string, width, height uint) string {
 	return fmt.Sprintf("%s/%d/%d", name, width, height)
 }
+
 func GetImageFromCache(name string, width, height uint) []byte {
+	Cache.Mutex.RLock()
 	ent := Cache.Cache[BuildCacheKey(name, width, height)]
+	Cache.Mutex.RUnlock()
 
 	if ent != nil {
 		Info(0, "Cache hit for: %s %d %d", name, width,height)
@@ -41,22 +48,33 @@ func GetImageFromCache(name string, width, height uint) []byte {
 	return nil
 }
 
-
 func addImageToCache(name string, width, height uint, image []byte) {
-	ent := new(ImageCacheEntry)
+
+	Cache.Mutex.Lock()
+
+	key := BuildCacheKey(name, width, height)
+
+	ent := Cache.Cache[key]
+
+	if ent != nil {
+		Cache.CacheSize -= int64(len(ent.image))
+	} else {
+		ent = new(ImageCacheEntry)
+		Cache.Cache[key] = ent
+	}
 
 	ent.timestamp = time.Now()
 	ent.image = image
 
-	Cache.Cache[BuildCacheKey(name, width, height)] = ent
 	Cache.CacheSize += int64(len(image))
 
-	Info(0, "add image '%s' %d %d to cache, cache size %.3f MB", name, width, height, float32(Cache.CacheSize)/MB)
-
+	Info(0, "added image '%s' %d %d to cache, cache size %.3f MB", name, width, height, float32(Cache.CacheSize)/MB)
 
 	if Cache.CacheSize > Cache.CacheSizeLimit {
 		cleanCache()
 	}
+
+	Cache.Mutex.Unlock()
 }
 
 func cleanCache() {
