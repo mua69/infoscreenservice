@@ -32,10 +32,13 @@ type Config struct {
 
 	AppRoot string
 	RepoRoot string
+
 	ContentSourceDir string
 	Content2SourceDir string
 	ImageSourceDir string
 	TickerSourceDir string
+	TickerDefaultFile string
+
 	ContentSyncInterval int
 	BrowserPath string
 	TerminateHour int
@@ -58,6 +61,7 @@ type ImagesResponse struct {
 	Content2Images []string `json:"content2_images"`
 	MixinImages []string `json:"mixin_images"`
 	Ticker []string `json:"ticker"`
+	TickerDefault string `json:"ticker_default"`
 }
 
 type ConfigResponse struct {
@@ -79,17 +83,20 @@ var ImageExtensions FileExtMap
 var TextExtensions FileExtMap
 
 var ContentList []string
-var ContentTimeStamp time.Time
+var ContentListHash string
 
 var Content2List []string
-var Content2TimeStamp time.Time
+var Content2ListHash string
 
 var DiaShowList []string
-var DiaShowTimeStamp time.Time
+var DiaShowHash string
 
 var Ticker []string
 var TickerList []string
-var TickerTimeStamp time.Time
+var TickerHash string
+
+var TickerDefault string
+var TickerDefaultHash string
 
 var ContentMutex sync.Mutex
 
@@ -103,7 +110,7 @@ var BrowserCmd *exec.Cmd
 var g_config = Config{LogFile:"infoscreen.log", AppRoot:"app", RepoRoot:"rep", BindPort:5000, BindAdr:"localhost",
 	ImageSourceDir:"imageSourceDirNotSet", ContentSourceDir:"contentSourceDirNotSet",
 	Content2SourceDir:"content2SourceDirNotSet",
-	TickerSourceDir:"tickerSourceDirNotSet",
+	TickerSourceDir:"tickerSourceDirNotSet", TickerDefaultFile:"TickerDefaultFileNotSet",
 	ContentImageDisplayDuration:5, TickerDisplayDuration:5,
 	ContentSyncInterval:60, MixinImageDisplayDuration:5, MixinImageRate:2,
 	OpenWeatherMapUrl:"http://api.openweathermap.org/data/2.5",
@@ -356,7 +363,7 @@ func handleGetContentRequest(resp http.ResponseWriter, req *http.Request) {
 	ContentMutex.Lock()
 
 	res := ImagesResponse{ContentImages:ContentList, Content2Images:Content2List,
-		MixinImages:DiaShowList, Ticker:Ticker}
+		MixinImages:DiaShowList, Ticker:Ticker, TickerDefault:TickerDefault}
 
 	d, err := json.Marshal(res)
 	if err != nil {
@@ -392,16 +399,12 @@ func syncContent() {
 	for !Terminate {
 		Info(1, "Syncing content...")
 
-		refCnt := len(ContentList)
-
-		nl, ts := checkAndImport(g_config.ContentSourceDir, ContentTimeStamp, refCnt, isImageFile)
+		nl, h := checkAndImport(g_config.ContentSourceDir, ContentListHash, isImageFile)
 
 		if nl != nil {
 			ContentMutex.Lock()
-
 			ContentList = nl
-			ContentTimeStamp = ts
-
+			ContentListHash = h
 			ContentMutex.Unlock()
 
 			Info(0, "New Content List")
@@ -410,15 +413,12 @@ func syncContent() {
 			}
 		}
 
-		refCnt = len(Content2List)
-		nl, ts = checkAndImport(g_config.Content2SourceDir, Content2TimeStamp, refCnt, isImageFile)
+		nl, h = checkAndImport(g_config.Content2SourceDir, Content2ListHash, isImageFile)
 
 		if nl != nil {
 			ContentMutex.Lock()
-
 			Content2List = nl
-			Content2TimeStamp = ts
-
+			Content2ListHash = h
 			ContentMutex.Unlock()
 
 			Info(0, "New Content2 List")
@@ -427,14 +427,11 @@ func syncContent() {
 			}
 		}
 
-		refCnt = len(DiaShowList)
-		nl, ts = checkAndImport(g_config.ImageSourceDir, DiaShowTimeStamp, refCnt, isImageFile)
+		nl, h = checkAndImport(g_config.ImageSourceDir, DiaShowHash, isImageFile)
 		if nl != nil {
 			ContentMutex.Lock()
-
 			DiaShowList = nl
-			DiaShowTimeStamp = ts
-
+			DiaShowHash = h
 			ContentMutex.Unlock()
 
 			Info(0, "New DiaShow List")
@@ -443,13 +440,11 @@ func syncContent() {
 			}
 		}
 
-		refCnt = len(TickerList)
-		nl, ts = checkAndImport(g_config.TickerSourceDir, TickerTimeStamp, refCnt, isTextFile)
+		nl, h = checkAndImport(g_config.TickerSourceDir, TickerHash, isTextFile)
 		if nl != nil {
 			ContentMutex.Lock()
-
 			TickerList = nl
-			TickerTimeStamp = ts
+			TickerHash = h
 			Ticker = nil
 
 			Info(0, "New Ticker List")
@@ -465,6 +460,19 @@ func syncContent() {
 			ContentMutex.Unlock()
 		}
 
+		if g_config.TickerDefaultFile != "" {
+			hash := hashFile(g_config.TickerDefaultFile)
+			if hash != "" && hash != TickerDefaultHash {
+				tl := parserTickerFile(g_config.TickerDefaultFile)
+				if len(tl) == 0 {
+					TickerDefault = ""
+				} else {
+					TickerDefault = tl[0]
+				}
+				TickerDefaultHash = hash
+				Info(0, "New Ticker Default: \"%s\"", TickerDefault)
+			}
+		}
 
 		time.Sleep(time.Duration(g_config.ContentSyncInterval) * time.Second)
 	}
@@ -491,7 +499,7 @@ func terminate() {
 }
 
 func startBrowser() {
-	time.Sleep(5*time.Second)
+	time.Sleep(10*time.Second)
 
 	if g_config.BrowserPath != "" {
 		url := fmt.Sprintf("http://%s:%d/", "localhost", g_config.BindPort)

@@ -4,10 +4,15 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+	"hash"
 	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -113,54 +118,60 @@ func copyToRepo(path string) string {
 	return repoFile
 }
 
-func collectFilesFromDirectory(path string, filecheck func(string) bool) ([]string, time.Time) {
+func collectFilesFromDirectory(path string, filecheck func(string) bool, mac *hash.Hash) []string {
 	var res []string
-	var ts time.Time
 
 	files, err := ioutil.ReadDir(path)
 
 	if err != nil {
 		Error("collectFilesFromDirectory: failed to read directory: %s: %s", path, err.Error())
-		return res, ts
+		return nil
 	}
+
+	sort.Slice(files, func(a, b int) bool { return files[a].Name() < files[b].Name() } )
 
 	for _, file := range files {
 		Info(1, "Checking file: %s", file.Name())
 		if file.IsDir() && file.Name() != "." && file.Name() != ".." {
-			r, t := collectFilesFromDirectory(filepath.Join(path, file.Name()), filecheck)
+			r := collectFilesFromDirectory(filepath.Join(path, file.Name()), filecheck, mac)
 			res = append(res, r...)
-			if t.After(ts) {
-				ts = t
-			}
 		} else {
 			if filecheck(file.Name()) {
 				res = append(res, filepath.Join(path, file.Name()))
-				if file.ModTime().After(ts) {
-					ts = file.ModTime()
-				}
+				stamp := fmt.Sprintf("%s-%s-%d", file.Name(), file.ModTime().Format(time.RFC3339), file.Size())
+				io.Copy(*mac, strings.NewReader(stamp))
 			}
 		}
 	}
 
-	return res, ts
+	return res
 }
 
-func checkAndImport(sourceDir string, refTimeStamp time.Time, refCount int, filecheck func(string) bool) ([]string, time.Time) {
-	files, ts := collectFilesFromDirectory(sourceDir, filecheck)
+func checkAndImport(sourceDir string, refHash string, filecheck func(string) bool) ([]string, string) {
+	mac := hmac.New(sha256.New, nil)
+
+	files := collectFilesFromDirectory(sourceDir, filecheck, &mac)
+
+	sum := mac.Sum(nil)
+
+	h := hex.EncodeToString(sum)
+
+	Info(0, "checkAndImport:hash: %s", h)
 
 	var res []string
 
-	if !ts.After(refTimeStamp) && len(files) == refCount {
-		return nil, ts
-	}
+	if h != refHash {
 
-	for _, f := range files {
-		fh := copyToRepo(f)
+		for _, f := range files {
+			fh := copyToRepo(f)
 
-		if fh != "" {
-			res = append(res, fh)
+			if fh != "" {
+				res = append(res, fh)
+			}
 		}
+
+		return res, h
 	}
 
-	return res, ts
+	return nil, ""
 }
