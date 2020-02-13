@@ -35,6 +35,7 @@ type Config struct {
 
 	ContentSourceDir string
 	Content2SourceDir string
+	Content3SourceDir string
 	ImageSourceDir string
 	TickerSourceDir string
 	TickerDefaultFile string
@@ -59,6 +60,7 @@ type Config struct {
 type ImagesResponse struct {
 	ContentImages []string `json:"content_images"`
 	Content2Images []string `json:"content2_images"`
+	Content3Images []string `json:"content3_images"`
 	MixinImages []string `json:"mixin_images"`
 	Ticker []string `json:"ticker"`
 	TickerDefault string `json:"ticker_default"`
@@ -88,6 +90,9 @@ var ContentListHash string
 var Content2List []string
 var Content2ListHash string
 
+var Content3List []string
+var Content3ListHash string
+
 var DiaShowList []string
 var DiaShowHash string
 
@@ -108,8 +113,7 @@ var BrowserCmd *exec.Cmd
 
 
 var g_config = Config{LogFile:"infoscreen.log", AppRoot:"app", RepoRoot:"rep", BindPort:5000, BindAdr:"localhost",
-	ImageSourceDir:"imageSourceDirNotSet", ContentSourceDir:"contentSourceDirNotSet",
-	Content2SourceDir:"content2SourceDirNotSet",
+	ImageSourceDir:"", ContentSourceDir:"",	Content2SourceDir:"",Content3SourceDir:"",
 	TickerSourceDir:"tickerSourceDirNotSet", TickerDefaultFile:"TickerDefaultFileNotSet",
 	ContentImageDisplayDuration:5, TickerDisplayDuration:5,
 	ContentSyncInterval:60, MixinImageDisplayDuration:5, MixinImageRate:2,
@@ -363,6 +367,7 @@ func handleGetContentRequest(resp http.ResponseWriter, req *http.Request) {
 	ContentMutex.Lock()
 
 	res := ImagesResponse{ContentImages:ContentList, Content2Images:Content2List,
+		Content3Images:Content3List,
 		MixinImages:DiaShowList, Ticker:Ticker, TickerDefault:TickerDefault}
 
 	d, err := json.Marshal(res)
@@ -399,64 +404,114 @@ func syncContent() {
 	for !Terminate {
 		Info(1, "Syncing content...")
 
-		nl, h := checkAndImport(g_config.ContentSourceDir, ContentListHash, isImageFile)
+		if g_config.ContentSourceDir != "" {
+			nl, h := checkAndImport(g_config.ContentSourceDir, ContentListHash, isImageFile)
 
-		if nl != nil {
-			ContentMutex.Lock()
-			ContentList = nl
-			ContentListHash = h
-			ContentMutex.Unlock()
+			if nl != nil {
+				ContentMutex.Lock()
+				ContentList = nl
+				ContentListHash = h
+				ContentMutex.Unlock()
 
-			Info(0, "New Content List")
-			for _, i := range ContentList {
-				Info(0, "  %s", i)
-			}
-		}
-
-		nl, h = checkAndImport(g_config.Content2SourceDir, Content2ListHash, isImageFile)
-
-		if nl != nil {
-			ContentMutex.Lock()
-			Content2List = nl
-			Content2ListHash = h
-			ContentMutex.Unlock()
-
-			Info(0, "New Content2 List")
-			for _, i := range Content2List {
-				Info(0, "  %s", i)
-			}
-		}
-
-		nl, h = checkAndImport(g_config.ImageSourceDir, DiaShowHash, isImageFile)
-		if nl != nil {
-			ContentMutex.Lock()
-			DiaShowList = nl
-			DiaShowHash = h
-			ContentMutex.Unlock()
-
-			Info(0, "New DiaShow List")
-			for _, i := range DiaShowList {
-				Info(0, "  %s", i)
-			}
-		}
-
-		nl, h = checkAndImport(g_config.TickerSourceDir, TickerHash, isTextFile)
-		if nl != nil {
-			ContentMutex.Lock()
-			TickerList = nl
-			TickerHash = h
-			Ticker = nil
-
-			Info(0, "New Ticker List")
-			for _, i := range TickerList {
-				Info(0, "  %s", i)
-
-				tent := parserTickerFile(filepath.Join(g_config.RepoRoot, i))
-				if tent != nil {
-					Ticker = append(Ticker, tent...)
+				Info(0, "New Content List")
+				for _, i := range ContentList {
+					Info(0, "  %s", i)
 				}
 			}
+		} else {
+			ContentMutex.Lock()
+			ContentList = make([]string, 0)
+			ContentListHash = ""
+			ContentMutex.Unlock()
+		}
 
+		if g_config.Content2SourceDir != "" {
+			nl, h := checkAndImport(g_config.Content2SourceDir, Content2ListHash, isImageFile)
+
+			if nl != nil {
+				ContentMutex.Lock()
+				Content2List = nl
+				Content2ListHash = h
+				ContentMutex.Unlock()
+
+				Info(0, "New Content2 List")
+				for _, i := range Content2List {
+					Info(0, "  %s", i)
+				}
+			}
+		} else {
+			ContentMutex.Lock()
+			Content2List = make([]string, 0)
+			Content2ListHash = ""
+			ContentMutex.Unlock()
+		}
+
+		if g_config.Content3SourceDir != "" {
+			nl, h := checkAndImport(g_config.Content3SourceDir, Content3ListHash, isImageFile)
+
+			if nl != nil {
+				ContentMutex.Lock()
+				Content3List = nl
+				Content3ListHash = h
+				ContentMutex.Unlock()
+
+				Info(0, "New Content3 List")
+				for _, i := range Content3List {
+					Info(0, "  %s", i)
+				}
+			}
+		} else {
+			ContentMutex.Lock()
+			Content3List = make([]string, 0)
+			Content3ListHash = ""
+			ContentMutex.Unlock()
+		}
+
+		if g_config.ImageSourceDir != "" {
+			nl, h := checkAndImport(g_config.ImageSourceDir, DiaShowHash, isImageFile)
+			if nl != nil {
+				ContentMutex.Lock()
+				DiaShowList = nl
+				DiaShowHash = h
+				ContentMutex.Unlock()
+
+				Info(0, "New DiaShow List")
+				for _, i := range DiaShowList {
+					Info(0, "  %s", i)
+				}
+			}
+		} else {
+			ContentMutex.Lock()
+			DiaShowList = make([]string, 0)
+			DiaShowHash = ""
+			ContentMutex.Unlock()
+		}
+
+		if g_config.TickerSourceDir != "" {
+			nl, h := checkAndImport(g_config.TickerSourceDir, TickerHash, isTextFile)
+			if nl != nil {
+				ContentMutex.Lock()
+				TickerList = nl
+				TickerHash = h
+				Ticker = nil
+
+				Info(0, "New Ticker List")
+				for _, i := range TickerList {
+					Info(0, "  %s", i)
+
+					tent := parserTickerFile(filepath.Join(g_config.RepoRoot, i))
+					if tent != nil {
+						Ticker = append(Ticker, tent...)
+					}
+				}
+
+				ContentMutex.Unlock()
+			}
+		} else {
+			ContentMutex.Lock()
+			TickerList = nil
+			Ticker = make([]string, 0)
+			TickerHash = ""
 			ContentMutex.Unlock()
 		}
 
