@@ -118,7 +118,7 @@ var g_config = Config{LogFile:"infoscreen.log", AppRoot:"app", RepoRoot:"rep", B
 	ContentImageDisplayDuration:5, TickerDisplayDuration:5,
 	ContentSyncInterval:60, MixinImageDisplayDuration:5, MixinImageRate:2,
 	OpenWeatherMapUrl:"http://api.openweathermap.org/data/2.5",
-	ScreenConfig:1, CacheSize:100 }
+	ScreenConfig:1, CacheSize:100, TerminateHour:-1 }
 
 
 func readConfig(filename string) bool {
