@@ -156,7 +156,7 @@ func checkAndImport(sourceDir string, refHash string, filecheck func(string) boo
 
 	h := hex.EncodeToString(sum)
 
-	Info(0, "checkAndImport:hash: %s", h)
+	Info(1, "checkAndImport:hash: %s", h)
 
 	var res []string
 

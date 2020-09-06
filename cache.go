@@ -41,7 +41,7 @@ func GetImageFromCache(name string, width, height uint) []byte {
 	defer Cache.Mutex.Unlock()
 
 	if ent != nil {
-		Info(0, "Cache hit for: %s %d %d", name, width,height)
+		Info(1, "Cache hit for: %s %d %d", name, width,height)
 		ent.timestamp = time.Now()
 		return ent.image
 	}
@@ -74,7 +74,7 @@ func addImageToCache(name string, width, height uint, image []byte) {
 
 	Cache.CacheSize += int64(n)
 
-	Info(0, "added image '%s' %d %d to cache, cache size %.3f MB", name, width, height, float32(Cache.CacheSize)/MB)
+	Info(1, "added image '%s' %d %d to cache, cache size %.3f MB", name, width, height, float32(Cache.CacheSize)/MB)
 
 	if Cache.CacheSize > Cache.CacheSizeLimit {
 		cleanCache()
@@ -111,14 +111,14 @@ func cleanCache() {
 	for i = 0; i < n && Cache.CacheSize > Cache.CacheSizeLimit; i++ {
 		Cache.CacheSize -= int64(len(cacheEntries[i].ent.image))
 		if Cache.CacheSize < 0 {
-			Info(0, "cleanCache: cache size < 0")
+			Info(1, "cleanCache: cache size < 0")
 			Cache.CacheSize = 0
 		}
-		Info(0, "cleanCache: removing cache entry: %s", cacheEntries[i].key)
+		Info(1, "cleanCache: removing cache entry: %s", cacheEntries[i].key)
 		delete(Cache.Cache, cacheEntries[i].key)
 	}
 
-	Info(0, "cleanCache: final cache size %.3f MB", float32(Cache.CacheSize)/MB)
+	Info(1, "cleanCache: final cache size %.3f MB", float32(Cache.CacheSize)/MB)
 }
 
 

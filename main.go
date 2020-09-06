@@ -26,6 +26,7 @@ import (
 
 type Config struct {
 	LogFile string
+	Verbosity int
 	BindPort int
 	BindAdr string
 	CacheSize uint
@@ -112,7 +113,7 @@ var BrowserCmd *exec.Cmd
 
 
 
-var g_config = Config{LogFile:"infoscreen.log", AppRoot:"app", RepoRoot:"rep", BindPort:5000, BindAdr:"localhost",
+var g_config = Config{LogFile:"infoscreen.log", Verbosity:0, AppRoot:"app", RepoRoot:"rep", BindPort:5000, BindAdr:"localhost",
 	ImageSourceDir:"", ContentSourceDir:"",	Content2SourceDir:"",Content3SourceDir:"",
 	TickerSourceDir:"tickerSourceDirNotSet", TickerDefaultFile:"TickerDefaultFileNotSet",
 	ContentImageDisplayDuration:5, TickerDisplayDuration:5,
@@ -306,7 +307,7 @@ func serveFile(urlRoot, basePath string, resp http.ResponseWriter, req *http.Req
 
 	path = filepath.Join(basePath, path)
 
-	Info(0, "Request: %s", req.URL.Path)
+	Info(1, "Request: %s", req.URL.Path)
 
 	fp, err := os.Open(path)
 
@@ -563,6 +564,8 @@ func startBrowser() {
 		if err := BrowserCmd.Start(); err != nil {
 			Error("Failed to start browser: %s", err.Error())
 			BrowserCmd = nil
+		} else {
+			BrowserCmd.Wait()
 		}
 	}
 }
@@ -572,8 +575,6 @@ func stopBrowser() {
 		if err := BrowserCmd.Process.Signal(syscall.SIGKILL); err != nil {
 			Error("Failed to kill browser: %s", err.Error())
 		}
-
-		BrowserCmd.Wait()
 	}
 }
 
@@ -599,6 +600,8 @@ func main() {
 	if !readConfig("config.json") {
 		os.Exit(1)
 	}
+
+	gVerbosity = g_config.Verbosity
 
 	if g_config.LogFile != "" {
 		if !OpenLogFile(g_config.LogFile) {
