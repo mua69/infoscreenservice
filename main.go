@@ -52,6 +52,7 @@ type Config struct {
 	MixinImageDisplayDuration int
 	MixinImageRate int
 	TickerDisplayDuration int
+	MaxVideoDuration int
 
 	OpenWeatherMapUrl string
 	OpenWeatherMapApiKey string
@@ -77,6 +78,9 @@ type ConfigResponse struct {
 	TickerDisplayDuration int `json:"ticker_display_duration"`
 	MixinImageDisplayDuration int `json:"mixin_image_display_duration"`
 	MixinImageRate int `json:"mixin_image_rate"`
+	MaxVideoDuration int `json:"max_video_duration"`
+
+	VideoExtensions []string `json:"video_extensions"`
 }
 
 
@@ -84,6 +88,7 @@ type FileExtMap map[string]bool
 
 var ImageExtensions FileExtMap
 var TextExtensions FileExtMap
+var VideoExtensions FileExtMap
 
 var ContentList []string
 var ContentListHash string
@@ -111,13 +116,14 @@ var Terminate = false
 var HttpServer *http.Server
 var BrowserCmd *exec.Cmd
 
+var VideoExtensionList = []string{".mp4", ".mov"}
 
 
 var g_config = Config{LogFile:"infoscreen.log", Verbosity:0, AppRoot:"app", RepoRoot:"rep", BindPort:5000, BindAdr:"localhost",
 	ImageSourceDir:"", ContentSourceDir:"",	Content2SourceDir:"",Content3SourceDir:"",
 	TickerSourceDir:"tickerSourceDirNotSet", TickerDefaultFile:"TickerDefaultFileNotSet",
 	ContentImageDisplayDuration:5, TickerDisplayDuration:5,
-	ContentSyncInterval:60, MixinImageDisplayDuration:5, MixinImageRate:2,
+	ContentSyncInterval:60, MixinImageDisplayDuration:5, MixinImageRate:2, MaxVideoDuration: 0,
 	OpenWeatherMapUrl:"http://api.openweathermap.org/data/2.5",
 	ScreenConfig:1, CacheSize:100, TerminateHour:-1 }
 
@@ -142,12 +148,16 @@ func readConfig(filename string) bool {
 func setupFileExtensions() {
 	ImageExtensions = make(FileExtMap)
 	TextExtensions = make(FileExtMap)
+	VideoExtensions = make(FileExtMap)
 
 	ImageExtensions[".jpg"] = true
 	ImageExtensions[".png"] = true
 
 	TextExtensions[".txt"] = true
 
+	for _, e := range VideoExtensionList {
+		VideoExtensions[e] = true
+	}
 }
 
 
@@ -236,6 +246,16 @@ func isImageFile(filename string) bool {
 
 func isTextFile(filename string) bool {
 	return TextExtensions[strings.ToLower(filepath.Ext(filename))]
+}
+
+func isVideoFile(filename string) bool {
+	return VideoExtensions[strings.ToLower(filepath.Ext(filename))]
+}
+
+func isImageOrVideoFile(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+
+	return ImageExtensions[ext] || VideoExtensions[ext]
 }
 
 func sendSizedImage(name string, fp *os.File, width, height uint, resp http.ResponseWriter, req *http.Request) {
@@ -389,10 +409,12 @@ func handleGetConfigRequest(resp http.ResponseWriter, req *http.Request) {
 		ContentImageDisplayDuration:g_config.ContentImageDisplayDuration,
 		TickerDisplayDuration:g_config.TickerDisplayDuration,
 		MixinImageRate:g_config.MixinImageRate,
+		MaxVideoDuration:g_config.MaxVideoDuration,
 		MixinImageDisplayDuration:g_config.MixinImageDisplayDuration,
 		OpenWeatherMapUrl:g_config.OpenWeatherMapUrl,
 		OpenWeatherMapApiKey:g_config.OpenWeatherMapApiKey,
-		OpenWeatherMapCityId:g_config.OpenWeatherMapCityId}
+		OpenWeatherMapCityId:g_config.OpenWeatherMapCityId,
+		VideoExtensions:VideoExtensionList}
 
 	d, err := json.Marshal(res)
 	if err != nil {
@@ -469,7 +491,7 @@ func syncContent() {
 		}
 
 		if g_config.ImageSourceDir != "" {
-			nl, h := checkAndImport(g_config.ImageSourceDir, DiaShowHash, isImageFile)
+			nl, h := checkAndImport(g_config.ImageSourceDir, DiaShowHash, isImageOrVideoFile)
 			if nl != nil {
 				ContentMutex.Lock()
 				DiaShowList = nl
