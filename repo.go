@@ -158,9 +158,8 @@ func checkAndImport(sourceDir string, refHash string, filecheck func(string) boo
 
 	Info(1, "checkAndImport:hash: %s", h)
 
-	var res []string
-
 	if h != refHash {
+		res := make([]string, 0, 10)
 
 		for _, f := range files {
 			fh := copyToRepo(f)

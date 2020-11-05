@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/nfnt/resize"
-	"golang.org/x/text/encoding/charmap"
 	"image"
 	_ "image/jpeg"
 	"image/png"
@@ -21,7 +20,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"unicode/utf8"
 )
 
 type Config struct {
@@ -60,12 +58,13 @@ type Config struct {
 }
 
 type ImagesResponse struct {
-	ContentImages []string `json:"content_images"`
-	Content2Images []string `json:"content2_images"`
-	Content3Images []string `json:"content3_images"`
-	MixinImages []string `json:"mixin_images"`
-	Ticker []string `json:"ticker"`
-	TickerDefault string `json:"ticker_default"`
+	Serial int32 `json:"serial"`
+	ContentImages []Content `json:"content_images"`
+	Content2Images []Content `json:"content2_images"`
+	Content3Images []Content `json:"content3_images"`
+	MixinImages []Content `json:"mixin_images"`
+	Ticker []Content `json:"ticker"`
+	TickerDefault Content `json:"ticker_default"`
 }
 
 type ConfigResponse struct {
@@ -90,24 +89,13 @@ var ImageExtensions FileExtMap
 var TextExtensions FileExtMap
 var VideoExtensions FileExtMap
 
-var ContentList []string
-var ContentListHash string
+var Content1 *ContentSource
+var Content2 *ContentSource
+var Content3 *ContentSource
+var Dias *ContentSource
+var Ticker *ContentSource
+var TickerDefault *ContentSource
 
-var Content2List []string
-var Content2ListHash string
-
-var Content3List []string
-var Content3ListHash string
-
-var DiaShowList []string
-var DiaShowHash string
-
-var Ticker []string
-var TickerList []string
-var TickerHash string
-
-var TickerDefault string
-var TickerDefaultHash string
 
 var ContentMutex sync.Mutex
 
@@ -116,7 +104,7 @@ var Terminate = false
 var HttpServer *http.Server
 var BrowserCmd *exec.Cmd
 
-var VideoExtensionList = []string{".mp4", ".mov"}
+
 
 
 var g_config = Config{LogFile:"infoscreen.log", Verbosity:0, AppRoot:"app", RepoRoot:"rep", BindPort:5000, BindAdr:"localhost",
@@ -145,77 +133,6 @@ func readConfig(filename string) bool {
 	return true
 }
 
-func setupFileExtensions() {
-	ImageExtensions = make(FileExtMap)
-	TextExtensions = make(FileExtMap)
-	VideoExtensions = make(FileExtMap)
-
-	ImageExtensions[".jpg"] = true
-	ImageExtensions[".png"] = true
-
-	TextExtensions[".txt"] = true
-
-	for _, e := range VideoExtensionList {
-		VideoExtensions[e] = true
-	}
-}
-
-
-func parserTickerFile(path string) []string {
-	buf, err := ioutil.ReadFile(path)
-
-	var res []string
-
-
-	if err != nil {
-		Error("Failed to read ticker file: %s: %s", path, err.Error())
-		return nil
-	}
-
-	sbuf := string(buf)
-
-	if !utf8.Valid(buf) {
-		Info(1, "Converting to UTF8")
-		s, err := charmap.Windows1252.NewDecoder().String(string(buf))
-		if err == nil {
-			sbuf = s
-		} else {
-			Error("Decoding windows-1252 to UTF8 failed: %s", err.Error())
-		}
-	}
-
-	tickerData := strings.Split(sbuf, "\n")
-
-	state := 0 // states: 0: remove empty lines, 1: collect ticker data
-	tickerEnt := ""
-	for _, s := range tickerData {
-		s = strings.TrimSpace(s)
-
-		if s == "" {
-			if state == 0 {
-				// eat up emtpy line
-				continue
-			}
-			// state is 1, end of ticker entry
-			res = append(res, tickerEnt)
-			tickerEnt = ""
-			state = 0
-		} else {
-			state = 1
-			if tickerEnt != "" {
-				tickerEnt += " "
-			}
-			tickerEnt += s
-		}
-	}
-
-	if state == 1 {
-		res = append(res, tickerEnt)
-	}
-
-	return res
-}
-
 func removeUrlRoot(url, root string) string {
 	if strings.HasPrefix(url, root) {
 		return url[len(root):]
@@ -240,23 +157,6 @@ func determineContentType(path string) string {
 	}
 }
 
-func isImageFile(filename string) bool {
-	return ImageExtensions[strings.ToLower(filepath.Ext(filename))]
-}
-
-func isTextFile(filename string) bool {
-	return TextExtensions[strings.ToLower(filepath.Ext(filename))]
-}
-
-func isVideoFile(filename string) bool {
-	return VideoExtensions[strings.ToLower(filepath.Ext(filename))]
-}
-
-func isImageOrVideoFile(filename string) bool {
-	ext := strings.ToLower(filepath.Ext(filename))
-
-	return ImageExtensions[ext] || VideoExtensions[ext]
-}
 
 func sendSizedImage(name string, fp *os.File, width, height uint, resp http.ResponseWriter, req *http.Request) {
 	cacheImage := GetImageFromCache(name, width, height)
@@ -381,15 +281,26 @@ func handleRepRequest(resp http.ResponseWriter, req *http.Request) {
 	serveFile("/api/rep/", g_config.RepoRoot, resp, req)
 }
 
+func buildSerial(content... *ContentSource) int32 {
+	var serial int32
+	for _, c := range content {
+		serial += c.serial
+	}
+	return serial
+}
+
 func handleGetContentRequest(resp http.ResponseWriter, req *http.Request) {
 	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 	resp.Header().Set("Access-Control-Allow-Origin", "*")
 
 	ContentMutex.Lock()
 
-	res := ImagesResponse{ContentImages:ContentList, Content2Images:Content2List,
-		Content3Images:Content3List,
-		MixinImages:DiaShowList, Ticker:Ticker, TickerDefault:TickerDefault}
+	serial := buildSerial(Content1, Content2, Content3, Dias, Ticker, TickerDefault)
+
+	res := ImagesResponse{Serial:serial,
+		ContentImages:Content1.content, Content2Images:Content2.content,
+		Content3Images:Content3.content, MixinImages:Dias.content,
+		Ticker:Ticker.content, TickerDefault:TickerDefault.content[0]}
 
 	d, err := json.Marshal(res)
 	if err != nil {
@@ -427,130 +338,7 @@ func syncContent() {
 	for !Terminate {
 		Info(1, "Syncing content...")
 
-		if g_config.ContentSourceDir != "" {
-			nl, h := checkAndImport(g_config.ContentSourceDir, ContentListHash, isImageFile)
-
-			if nl != nil {
-				ContentMutex.Lock()
-				ContentList = nl
-				ContentListHash = h
-				ContentMutex.Unlock()
-
-				Info(0, "New Content List")
-				for _, i := range ContentList {
-					Info(0, "  %s", i)
-				}
-			}
-		} else {
-			ContentMutex.Lock()
-			ContentList = make([]string, 0)
-			ContentListHash = ""
-			ContentMutex.Unlock()
-		}
-
-		if g_config.Content2SourceDir != "" {
-			nl, h := checkAndImport(g_config.Content2SourceDir, Content2ListHash, isImageFile)
-
-			if nl != nil {
-				ContentMutex.Lock()
-				Content2List = nl
-				Content2ListHash = h
-				ContentMutex.Unlock()
-
-				Info(0, "New Content2 List")
-				for _, i := range Content2List {
-					Info(0, "  %s", i)
-				}
-			}
-		} else {
-			ContentMutex.Lock()
-			Content2List = make([]string, 0)
-			Content2ListHash = ""
-			ContentMutex.Unlock()
-		}
-
-		if g_config.Content3SourceDir != "" {
-			nl, h := checkAndImport(g_config.Content3SourceDir, Content3ListHash, isImageFile)
-
-			if nl != nil {
-				ContentMutex.Lock()
-				Content3List = nl
-				Content3ListHash = h
-				ContentMutex.Unlock()
-
-				Info(0, "New Content3 List")
-				for _, i := range Content3List {
-					Info(0, "  %s", i)
-				}
-			}
-		} else {
-			ContentMutex.Lock()
-			Content3List = make([]string, 0)
-			Content3ListHash = ""
-			ContentMutex.Unlock()
-		}
-
-		if g_config.ImageSourceDir != "" {
-			nl, h := checkAndImport(g_config.ImageSourceDir, DiaShowHash, isImageOrVideoFile)
-			if nl != nil {
-				ContentMutex.Lock()
-				DiaShowList = nl
-				DiaShowHash = h
-				ContentMutex.Unlock()
-
-				Info(0, "New DiaShow List")
-				for _, i := range DiaShowList {
-					Info(0, "  %s", i)
-				}
-			}
-		} else {
-			ContentMutex.Lock()
-			DiaShowList = make([]string, 0)
-			DiaShowHash = ""
-			ContentMutex.Unlock()
-		}
-
-		if g_config.TickerSourceDir != "" {
-			nl, h := checkAndImport(g_config.TickerSourceDir, TickerHash, isTextFile)
-			if nl != nil {
-				ContentMutex.Lock()
-				TickerList = nl
-				TickerHash = h
-				Ticker = nil
-
-				Info(0, "New Ticker List")
-				for _, i := range TickerList {
-					Info(0, "  %s", i)
-
-					tent := parserTickerFile(filepath.Join(g_config.RepoRoot, i))
-					if tent != nil {
-						Ticker = append(Ticker, tent...)
-					}
-				}
-
-				ContentMutex.Unlock()
-			}
-		} else {
-			ContentMutex.Lock()
-			TickerList = nil
-			Ticker = make([]string, 0)
-			TickerHash = ""
-			ContentMutex.Unlock()
-		}
-
-		if g_config.TickerDefaultFile != "" {
-			hash := hashFile(g_config.TickerDefaultFile)
-			if hash != "" && hash != TickerDefaultHash {
-				tl := parserTickerFile(g_config.TickerDefaultFile)
-				if len(tl) == 0 {
-					TickerDefault = ""
-				} else {
-					TickerDefault = tl[0]
-				}
-				TickerDefaultHash = hash
-				Info(0, "New Ticker Default: \"%s\"", TickerDefault)
-			}
-		}
+		updateContentSources()
 
 		time.Sleep(time.Duration(g_config.ContentSyncInterval) * time.Second)
 	}
@@ -635,10 +423,12 @@ func main() {
 
 	setupFileExtensions()
 
-	Ticker = make([]string, 0, 10)
-	ContentList = make([]string, 0, 10)
-	Content2List = make([]string, 0, 10)
-	DiaShowList = make([]string, 0, 10)
+	Ticker = getOrCreateContentSource(g_config.TickerSourceDir, ContentSourceTypeTicker)
+	TickerDefault = getOrCreateContentSource(g_config.TickerDefaultFile, ContentSourceTypeTickerDefault)
+	Content1 = getOrCreateContentSource(g_config.ContentSourceDir, ContentSourceTypeInfo)
+	Content2 = getOrCreateContentSource(g_config.Content2SourceDir, ContentSourceTypeInfo)
+	Content3 = getOrCreateContentSource(g_config.Content3SourceDir, ContentSourceTypeInfo)
+	Dias = getOrCreateContentSource(g_config.ImageSourceDir, ContentSourceTypeDia)
 
 	go syncContent()
 	go terminate()
