@@ -369,13 +369,24 @@ func startBrowser() {
 
 	if g_config.BrowserPath != "" {
 		url := fmt.Sprintf("http://%s:%d/", "localhost", g_config.BindPort)
-		BrowserCmd = exec.Command(g_config.BrowserPath, url)
 
-		if err := BrowserCmd.Start(); err != nil {
-			Error("Failed to start browser: %s", err.Error())
-			BrowserCmd = nil
-		} else {
-			BrowserCmd.Wait()
+		for {
+			Info(0, "Starting browser: %s", g_config.BrowserPath)
+
+			BrowserCmd = exec.Command(g_config.BrowserPath, url)
+
+			if err := BrowserCmd.Start(); err != nil {
+				Error("Failed to start browser: %s", err.Error())
+				BrowserCmd = nil
+			} else {
+				err = BrowserCmd.Wait()
+				if err != nil {
+					Info(0, "Browser exited with error: %s", err.Error())
+				} else {
+					Info(0, "Browser exited.")
+				}
+			}
+			time.Sleep(time.Second)
 		}
 	}
 }
