@@ -23,14 +23,29 @@ import (
 )
 
 type Config struct {
-	LogFile string
+	LogFile   string
 	Verbosity int
+
+	ContentSyncInterval int
+	BrowserPath         string
+	TerminateHour       int
+	TerminateMinute     int
+
+	CacheSize uint
+	RepoRoot string
+
+	OpenWeatherMapUrl    string
+	OpenWeatherMapApiKey string
+	OpenWeatherMapCityId string
+
+	Servers []ServerConfig
+}
+
+type ServerConfig struct {
 	BindPort int
 	BindAdr string
-	CacheSize uint
 
 	AppRoot string
-	RepoRoot string
 
 	ContentSourceDir string
 	Content2SourceDir string
@@ -39,25 +54,15 @@ type Config struct {
 	TickerSourceDir string
 	TickerDefaultFile string
 
-	ContentSyncInterval int
-	BrowserPath string
-	TerminateHour int
-	TerminateMinute int
-
-	ScreenConfig int
-
-	ContentImageDisplayDuration int
-	MixinImageDisplayDuration int
-	MixinImageRate int
-	TickerDisplayDuration int
-	MaxVideoDuration int
-
-	OpenWeatherMapUrl string
-	OpenWeatherMapApiKey string
-	OpenWeatherMapCityId string
+	ScreenConfig uint
+	ContentImageDisplayDuration uint
+	MixinImageDisplayDuration uint
+	MixinImageRate uint
+	TickerDisplayDuration uint
+	MaxVideoDuration uint
 }
 
-type ImagesResponse struct {
+type ContentResponse struct {
 	Serial int32 `json:"serial"`
 	ContentImages []Content `json:"content_images"`
 	Content2Images []Content `json:"content2_images"`
@@ -68,16 +73,16 @@ type ImagesResponse struct {
 }
 
 type ConfigResponse struct {
-	ScreenConfig int `json:"screen_config"`
+	ScreenConfig uint `json:"screen_config"`
 	OpenWeatherMapUrl string `json:"open_weather_map_url"`
 	OpenWeatherMapApiKey string `json:"open_weather_map_api_key"`
 	OpenWeatherMapCityId string `json:"open_weather_map_city_id"`
 
-	ContentImageDisplayDuration int `json:"content_image_display_duration"`
-	TickerDisplayDuration int `json:"ticker_display_duration"`
-	MixinImageDisplayDuration int `json:"mixin_image_display_duration"`
-	MixinImageRate int `json:"mixin_image_rate"`
-	MaxVideoDuration int `json:"max_video_duration"`
+	ContentImageDisplayDuration uint `json:"content_image_display_duration"`
+	TickerDisplayDuration uint `json:"ticker_display_duration"`
+	MixinImageDisplayDuration uint `json:"mixin_image_display_duration"`
+	MixinImageRate uint `json:"mixin_image_rate"`
+	MaxVideoDuration uint `json:"max_video_duration"`
 
 	VideoExtensions []string `json:"video_extensions"`
 }
@@ -89,31 +94,36 @@ var ImageExtensions FileExtMap
 var TextExtensions FileExtMap
 var VideoExtensions FileExtMap
 
-var Content1 *ContentSource
-var Content2 *ContentSource
-var Content3 *ContentSource
-var Dias *ContentSource
-var Ticker *ContentSource
-var TickerDefault *ContentSource
+type Server struct {
+	index int
+	config ServerConfig
+	httpServer *http.Server
+	content1 *ContentSource
+	content2 *ContentSource
+	content3 *ContentSource
+	dias *ContentSource
+	ticker *ContentSource
+	tickerDefault *ContentSource
+}
 
+var Servers []*Server
 
 var ContentMutex sync.Mutex
 
 var Terminate = false
 
-var HttpServer *http.Server
 var BrowserCmd *exec.Cmd
 
 
 
 
-var g_config = Config{LogFile:"infoscreen.log", Verbosity:0, AppRoot:"app", RepoRoot:"rep", BindPort:5000, BindAdr:"localhost",
-	ImageSourceDir:"", ContentSourceDir:"",	Content2SourceDir:"",Content3SourceDir:"",
-	TickerSourceDir:"tickerSourceDirNotSet", TickerDefaultFile:"TickerDefaultFileNotSet",
-	ContentImageDisplayDuration:5, TickerDisplayDuration:5,
-	ContentSyncInterval:60, MixinImageDisplayDuration:5, MixinImageRate:2, MaxVideoDuration: 0,
+var g_config = Config{LogFile:"infoscreen.log",
+	Verbosity:0,
+	ContentSyncInterval:60,
 	OpenWeatherMapUrl:"http://api.openweathermap.org/data/2.5",
-	ScreenConfig:1, CacheSize:100, TerminateHour:-1 }
+	CacheSize:100,
+	RepoRoot: "rep",
+	TerminateHour:-1 }
 
 
 func readConfig(filename string) bool {
@@ -267,11 +277,11 @@ func serveFile(urlRoot, basePath string, resp http.ResponseWriter, req *http.Req
 	}
 }
 
-func handleAppRequest(resp http.ResponseWriter, req *http.Request) {
+func handleAppRequest(server *Server, resp http.ResponseWriter, req *http.Request) {
 	//resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 	//resp.Header().Set("Access-Control-Allow-Origin", "*")
 
-	serveFile("/", g_config.AppRoot, resp, req)
+	serveFile("/", server.config.AppRoot, resp, req)
 }
 
 func handleRepRequest(resp http.ResponseWriter, req *http.Request) {
@@ -289,18 +299,19 @@ func buildSerial(content... *ContentSource) int32 {
 	return serial
 }
 
-func handleGetContentRequest(resp http.ResponseWriter, req *http.Request) {
+func handleGetContentRequest(server *Server, resp http.ResponseWriter, req *http.Request) {
 	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 	resp.Header().Set("Access-Control-Allow-Origin", "*")
 
 	ContentMutex.Lock()
 
-	serial := buildSerial(Content1, Content2, Content3, Dias, Ticker, TickerDefault)
+	serial := buildSerial(server.content1, server.content2, server.content3,
+		server.dias, server.ticker, server.tickerDefault)
 
-	res := ImagesResponse{Serial:serial,
-		ContentImages:Content1.content, Content2Images:Content2.content,
-		Content3Images:Content3.content, MixinImages:Dias.content,
-		Ticker:Ticker.content, TickerDefault:TickerDefault.content[0]}
+	res := ContentResponse{Serial:serial,
+		ContentImages:server.content1.content, Content2Images:server.content2.content,
+		Content3Images:server.content3.content, MixinImages:server.dias.content,
+		Ticker:server.ticker.content, TickerDefault:server.tickerDefault.content[0]}
 
 	d, err := json.Marshal(res)
 	if err != nil {
@@ -312,16 +323,16 @@ func handleGetContentRequest(resp http.ResponseWriter, req *http.Request) {
 	io.WriteString(resp, string(d))
 }
 
-func handleGetConfigRequest(resp http.ResponseWriter, req *http.Request) {
+func handleGetConfigRequest(server *Server, resp http.ResponseWriter, req *http.Request) {
 	resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 	resp.Header().Set("Access-Control-Allow-Origin", "*")
 
-	res := ConfigResponse{ScreenConfig:g_config.ScreenConfig,
-		ContentImageDisplayDuration:g_config.ContentImageDisplayDuration,
-		TickerDisplayDuration:g_config.TickerDisplayDuration,
-		MixinImageRate:g_config.MixinImageRate,
-		MaxVideoDuration:g_config.MaxVideoDuration,
-		MixinImageDisplayDuration:g_config.MixinImageDisplayDuration,
+	res := ConfigResponse{ScreenConfig:server.config.ScreenConfig,
+		ContentImageDisplayDuration:server.config.ContentImageDisplayDuration,
+		TickerDisplayDuration:server.config.TickerDisplayDuration,
+		MixinImageRate:server.config.MixinImageRate,
+		MaxVideoDuration:server.config.MaxVideoDuration,
+		MixinImageDisplayDuration:server.config.MixinImageDisplayDuration,
 		OpenWeatherMapUrl:g_config.OpenWeatherMapUrl,
 		OpenWeatherMapApiKey:g_config.OpenWeatherMapApiKey,
 		OpenWeatherMapCityId:g_config.OpenWeatherMapCityId,
@@ -351,9 +362,11 @@ func terminate() {
 		now := time.Now()
 
 		if now.Hour() == g_config.TerminateHour && now.Minute() == g_config.TerminateMinute {
-			err := HttpServer.Shutdown(context.Background())
-			if err != nil {
-				Error("Error will stopping http server: %s", err.Error())
+			for _, server := range Servers {
+				err := server.httpServer.Shutdown(context.Background())
+				if err != nil {
+					Error("Error will stopping http server[%d]: %s", server.index, err.Error())
+				}
 			}
 			stopBrowser()
 			Terminate = true
@@ -368,7 +381,7 @@ func startBrowser() {
 	time.Sleep(10*time.Second)
 
 	if g_config.BrowserPath != "" {
-		url := fmt.Sprintf("http://%s:%d/", "localhost", g_config.BindPort)
+		url := fmt.Sprintf("http://%s:%d/", "localhost", Servers[0].config.BindPort)
 
 		for {
 			Info(0, "Starting browser: %s", g_config.BrowserPath)
@@ -400,21 +413,97 @@ func stopBrowser() {
 }
 
 
-func startHttpServer() {
-	HttpServer = &http.Server{
-		Addr:           fmt.Sprintf("%s:%d", g_config.BindAdr, g_config.BindPort),
-		Handler:        nil,
+func startHttpServer(server *Server) {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/", func(resp http.ResponseWriter, req *http.Request){handleAppRequest(server, resp, req)})
+	mux.HandleFunc("/api/rep/", handleRepRequest)
+	mux.HandleFunc("/api/content", func(resp http.ResponseWriter, req *http.Request){handleGetContentRequest(server, resp, req)})
+	mux.HandleFunc("/api/config", func(resp http.ResponseWriter, req *http.Request){handleGetConfigRequest(server, resp, req)})
+
+	server.httpServer = &http.Server{
+		Addr:           fmt.Sprintf("%s:%d", server.config.BindAdr, server.config.BindPort),
+		Handler:        mux,
 		ReadTimeout:    20 * time.Second,
 		WriteTimeout:   20 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}
 
-	http.HandleFunc("/", handleAppRequest)
-	http.HandleFunc("/api/rep/", handleRepRequest)
-	http.HandleFunc("/api/content", handleGetContentRequest)
-	http.HandleFunc("/api/config", handleGetConfigRequest)
+	Info(0,"http server [%d] exited: %s", server.index, server.httpServer.ListenAndServe())
+}
 
-	Info(0,"http server exited: %s", HttpServer.ListenAndServe())
+func checkServerConfig(server *Server) {
+	err := false
+	c := &server.config
+	serverIndex := server.index
+
+	if c.BindAdr == "" {
+		c.BindAdr = "localhost"
+	}
+
+	if c.BindPort == 0 {
+		Error("Server[%d]: bind port not set.", serverIndex)
+		err = true
+	}
+
+	if c.BindPort < 0 {
+		Error("Server[%d]: invalid bind port: %d", serverIndex, c.BindPort)
+		err = true
+	}
+
+	if c.ContentImageDisplayDuration == 0 {
+		c.ContentImageDisplayDuration = 5
+	}
+
+	if c.TickerDisplayDuration == 0 {
+		c.TickerDisplayDuration = 5
+	}
+
+	if c.MixinImageDisplayDuration == 0 {
+		c.MixinImageDisplayDuration = 5
+	}
+
+	if c.MixinImageRate == 0 {
+		c.MixinImageRate = 2
+	}
+
+	if c.ScreenConfig == 0 {
+		c.ScreenConfig = 1
+	} else if c.ScreenConfig != 1 && c.ScreenConfig != 4 {
+		Error("Server[%d]: invalid ScreenConfig: %d", serverIndex, c.ScreenConfig)
+		err = true
+	}
+
+	if c.AppRoot == "" {
+		Error("Server[%d]: AppRoot not set.", serverIndex)
+		err = true
+	}
+
+	if err {
+		Fatal("Server[%d]: Error(s) in server configuration", serverIndex)
+	}
+}
+
+func setupServers() {
+	if len(g_config.Servers) == 0 {
+		Fatal("No servers configured.")
+	}
+
+	Servers = make([]*Server, len(g_config.Servers))
+	for i := range g_config.Servers {
+		server := new(Server)
+		Servers[i] = server
+		server.index = i
+		server.config = g_config.Servers[i]
+		checkServerConfig(server)
+		server.ticker = getOrCreateContentSource(server.config.TickerSourceDir, ContentSourceTypeTicker)
+		server.tickerDefault = getOrCreateContentSource(server.config.TickerDefaultFile, ContentSourceTypeTickerDefault)
+		server.content1 = getOrCreateContentSource(server.config.ContentSourceDir, ContentSourceTypeInfo)
+		server.content2 = getOrCreateContentSource(server.config.Content2SourceDir, ContentSourceTypeInfo)
+		server.content3 = getOrCreateContentSource(server.config.Content3SourceDir, ContentSourceTypeInfo)
+		server.dias = getOrCreateContentSource(server.config.ImageSourceDir, ContentSourceTypeDia)
+		go startHttpServer(server)
+	}
 }
 
 func main() {
@@ -434,16 +523,11 @@ func main() {
 
 	setupFileExtensions()
 
-	Ticker = getOrCreateContentSource(g_config.TickerSourceDir, ContentSourceTypeTicker)
-	TickerDefault = getOrCreateContentSource(g_config.TickerDefaultFile, ContentSourceTypeTickerDefault)
-	Content1 = getOrCreateContentSource(g_config.ContentSourceDir, ContentSourceTypeInfo)
-	Content2 = getOrCreateContentSource(g_config.Content2SourceDir, ContentSourceTypeInfo)
-	Content3 = getOrCreateContentSource(g_config.Content3SourceDir, ContentSourceTypeInfo)
-	Dias = getOrCreateContentSource(g_config.ImageSourceDir, ContentSourceTypeDia)
+
 
 	go syncContent()
 	go terminate()
-	go startHttpServer()
+	setupServers()
 	go startBrowser()
 
 	for !Terminate {
